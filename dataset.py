@@ -47,15 +47,11 @@ class VisionTextDataset(Dataset):
         self.samples = []
 
         self.jsonl_path = os.path.abspath(jsonl_path)
-        self.base_dir = os.path.dirname(self.jsonl_path)
+        self.dataset_root = os.path.abspath(
+            os.path.join(self.jsonl_path, "../../..")
+        )
 
-        # Try common image roots
-        self.possible_image_roots = [
-            self.base_dir,
-            os.path.join(self.base_dir, "images"),
-            os.path.join(self.base_dir, "output", "images"),
-            os.path.join(os.path.dirname(self.base_dir), "images"),
-        ]
+        self.image_index = self._build_image_index(self.dataset_root)
 
         with open(self.jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -66,38 +62,33 @@ class VisionTextDataset(Dataset):
                         "Each JSONL line must contain 'image_path' and 'text'"
                     )
 
-                image_path = self._resolve_image_path(data["image_path"])
-                data["image_path"] = image_path
+                filename = os.path.basename(data["image_path"])
+                if filename not in self.image_index:
+                    raise FileNotFoundError(f"Image not found: {filename}")
 
+                data["image_path"] = self.image_index[filename]
                 self.samples.append(data)
 
-        if len(self.samples) == 0:
+        if not self.samples:
             raise RuntimeError("Dataset is empty")
 
         print(f"✅ Loaded {len(self.samples)} samples")
 
-    def _resolve_image_path(self, image_path):
-        # Case 1: absolute path
-        if os.path.isabs(image_path) and os.path.exists(image_path):
-            return image_path
+    def _build_image_index(self, root_dir):
+        index = {}
+        valid_ext = (".jpg", ".jpeg", ".png", ".webp")
 
-        # Case 2: relative to jsonl
-        candidate = os.path.join(self.base_dir, image_path)
-        if os.path.exists(candidate):
-            return candidate
+        print("🔍 Indexing images (one-time)...")
+        for root, _, files in os.walk(root_dir):
+            for file in files:
+                if file.lower().endswith(valid_ext):
+                    index[file] = os.path.join(root, file)
 
-        # Case 3: search common image folders
-        image_name = os.path.basename(image_path)
-        for root in self.possible_image_roots:
-            candidate = os.path.join(root, image_name)
-            if os.path.exists(candidate):
-                return candidate
+        if not index:
+            raise RuntimeError("❌ No images found in dataset folder")
 
-        # ❌ Not found
-        raise FileNotFoundError(
-            f"❌ Image not found: {image_path}\n"
-            f"Searched in: {self.possible_image_roots}"
-        )
+        print(f"✅ Indexed {len(index)} images")
+        return index
 
     def __len__(self):
         return len(self.samples)
@@ -105,16 +96,16 @@ class VisionTextDataset(Dataset):
     def __getitem__(self, idx):
         item = self.samples[idx]
 
+        # image = Image.open(item["image_path"]).convert("RGB")
         image = Image.open(item["image_path"]).convert("RGB")
+        image = image.resize((448, 448), Image.BICUBIC)
         text = item["text"]
 
         inputs = self.processor(
             images=image,
             text=text,
             return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            max_length=128
+            truncation=True
         )
 
         inputs = {k: v.squeeze(0) for k, v in inputs.items()}
