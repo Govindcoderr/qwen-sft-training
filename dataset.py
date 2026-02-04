@@ -93,13 +93,51 @@ class VisionTextDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+    # def __getitem__(self, idx):
+
+    #     item = self.samples[idx]
+
+    #     # image = Image.open(item["image_path"]).convert("RGB")
+    #     image = Image.open(item["image_path"]).convert("RGB")
+    #     image = image.resize((448, 448), Image.BICUBIC)
+    #     text = "<image>\n" + item["text"]
+
+
+    #     inputs = self.processor(
+    #         images=image,
+    #         text=text,
+    #         return_tensors="pt",
+    #         truncation=True
+    #     )
+
+    #     inputs = {k: v.squeeze(0) for k, v in inputs.items()}
+    #     inputs["labels"] = inputs["input_ids"].clone()
+
+    #     return inputs
+     
     def __getitem__(self, idx):
+
         item = self.samples[idx]
 
-        # image = Image.open(item["image_path"]).convert("RGB")
         image = Image.open(item["image_path"]).convert("RGB")
         image = image.resize((448, 448), Image.BICUBIC)
-        text = item["text"]
+
+        # 🔥 QWEN OFFICIAL CHAT FORMAT
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": item["text"]}
+                ]
+            }
+        ]
+
+        text = self.processor.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
 
         inputs = self.processor(
             images=image,
@@ -110,5 +148,4 @@ class VisionTextDataset(Dataset):
 
         inputs = {k: v.squeeze(0) for k, v in inputs.items()}
         inputs["labels"] = inputs["input_ids"].clone()
-
         return inputs
